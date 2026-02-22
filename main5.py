@@ -1,84 +1,101 @@
+import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
 
-# Load dataset
-df = pd.read_csv("titanic-dataset.csv")
+st.set_page_config(page_title="Titanic Survival Predictor", layout="wide")
 
-# ----------------------------
-# Handle Missing Values
-# ----------------------------
+st.title("🚢 Titanic Survival Predictor")
 
-# Fill Age and Fare with median
-df["Age"] = df["Age"].fillna(df["Age"].median())
-df["Fare"] = df["Fare"].fillna(df["Fare"].median())
+# -----------------------
+# Upload Dataset
+# -----------------------
+st.sidebar.header("Upload Dataset")
+uploaded_file = st.sidebar.file_uploader("Upload Titanic CSV file", type=["csv"])
 
-# Drop rows where Embarked is missing
-df = df.dropna(subset=["Embarked"])
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
 
-# ----------------------------
-# Convert Categorical to Dummy Variables
-# ----------------------------
-df = pd.get_dummies(df, columns=["Sex", "Embarked"], drop_first=True)
+    st.success("File uploaded successfully!")
 
-# ----------------------------
-# Features and Target
-# ----------------------------
-X = df[[
-    "Pclass",
-    "Age",
-    "SibSp",
-    "Parch",
-    "Fare",
-    "Sex_male",
-    "Embarked_Q",
-    "Embarked_S"
-]]
+    # -----------------------
+    # Dataset Overview
+    # -----------------------
+    st.subheader("Dataset Overview")
+    st.write("Total Passengers:", df.shape[0])
+    st.write("Survived:", df["Survived"].sum())
+    st.write("Did Not Survive:", df.shape[0] - df["Survived"].sum())
 
-y = df["Survived"]
+    st.write("First 5 Rows")
+    st.dataframe(df.head())
 
-# ----------------------------
-# Train-Test Split
-# ----------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+    # -----------------------
+    # Data Preprocessing
+    # -----------------------
+    df = df.drop(["Name", "Ticket", "Cabin"], axis=1, errors="ignore")
 
-# ----------------------------
-# Feature Scaling
-# ----------------------------
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+    df["Age"].fillna(df["Age"].median(), inplace=True)
+    df["Fare"].fillna(df["Fare"].median(), inplace=True)
+    df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
 
-# ----------------------------
-# Model Training
-# ----------------------------
-model = LogisticRegression(max_iter=1000)
-model.fit(X_train, y_train)
+    label_encoders = {}
+    for col in ["Sex", "Embarked"]:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col])
+        label_encoders[col] = le
 
-# ----------------------------
-# Predictions
-# ----------------------------
-y_pred = model.predict(X_test)
+    # -----------------------
+    # Train Model
+    # -----------------------
+    X = df.drop("Survived", axis=1)
+    y = df["Survived"]
 
-# ----------------------------
-# Evaluation
-# ----------------------------
-print(classification_report(y_test, y_pred))
-print("Accuracy:", round(accuracy_score(y_test, y_pred), 3))
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-# Confusion Matrix
-cm = confusion_matrix(y_test, y_pred)
+    model = RandomForestClassifier(random_state=42)
+    model.fit(X_train, y_train)
 
-sns.heatmap(cm, annot=True, fmt='d', cmap="Blues")
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.title("Confusion Matrix")
-plt.tight_layout()
-plt.show()
+    predictions = model.predict(X_test)
+    accuracy = accuracy_score(y_test, predictions)
+
+    st.subheader("Model Performance")
+    st.info(f"Model Accuracy: {accuracy:.3f}")
+
+    # -----------------------
+    # Prediction Section
+    # -----------------------
+    st.subheader("Predict Survival")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        pclass = st.selectbox("Passenger Class", [1, 2, 3])
+        age = st.slider("Age", 1, 80, 30)
+        sibsp = st.number_input("Siblings/Spouses", 0, 8, 0)
+
+    with col2:
+        fare = st.number_input("Fare", 0.0, 500.0, 50.0)
+        sex = st.selectbox("Sex", ["Male", "Female"])
+        embarked = st.selectbox("Embarked", ["S", "C", "Q"])
+
+    if st.button("Predict"):
+        sex_encoded = label_encoders["Sex"].transform([sex])[0]
+        embarked_encoded = label_encoders["Embarked"].transform([embarked])[0]
+
+        input_data = np.array([[pclass, sex_encoded, age, sibsp, 0, fare, embarked_encoded]])
+
+        prediction = model.predict(input_data)[0]
+        probability = model.predict_proba(input_data)[0][prediction]
+
+        if prediction == 1:
+            st.success(f"Prediction: SURVIVED ({probability*100:.1f}%)")
+        else:
+            st.error(f"Prediction: DID NOT SURVIVE ({probability*100:.1f}%)")
+
+else:
+    st.warning("Please upload a Titanic dataset CSV file.")
